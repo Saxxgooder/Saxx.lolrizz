@@ -1,0 +1,339 @@
+wait(0.05)
+local blur = Instance.new("BlurEffect", game.Lighting)
+blur.Size = 0
+local ScreenGui = Instance.new("ScreenGui")
+local ImageLabel = Instance.new("ImageLabel")
+ScreenGui.Parent = game.CoreGui
+ImageLabel.Parent = ScreenGui
+ImageLabel.BackgroundColor3 = Color3.new(1, 1, 1)
+ImageLabel.BackgroundTransparency = 1
+ImageLabel.Position = UDim2.new(0.5, -(700 / 2), 0.5, -(700 / 2))
+ImageLabel.Rotation = 0
+ImageLabel.Size = UDim2.new(0, 700, 0, 700)
+ImageLabel.Image = "rbxassetid://116498431339664"
+ImageLabel.ImageTransparency = 1
+
+for i = 1, 50, 2 do
+    blur.Size = i
+    ImageLabel.ImageTransparency = ImageLabel.ImageTransparency - 0.1
+    wait()
+end
+wait(1)
+
+for i = 1, 50, 2 do
+    blur.Size = 50 - i
+    ImageLabel.ImageTransparency = ImageLabel.ImageTransparency + 0.1
+    wait()
+end
+
+blur:Destroy()
+ScreenGui:Destroy()
+wait(0.02)
+
+-- Notifications
+game.StarterGui:SetCore(
+    "SendNotification",
+    {
+        Title = "Saxxgooder",
+        Text = "Loading . . .",
+    }
+)
+wait(1)
+game.StarterGui:SetCore(
+    "SendNotification",
+    {
+        Title = "Saxxgooder",
+        Text = "Authenticating...",
+    }
+)
+wait(1)
+game.StarterGui:SetCore(
+    "SendNotification",
+    {
+        Title = "Saxxgooder",
+        Text = "Setting Up...",
+    }
+)
+wait(1)
+game.StarterGui:SetCore(
+    "SendNotification",
+    {
+        Title = "Saxxgooder",
+        Text = "Done!",
+    }
+)
+wait(0.5)
+game.StarterGui:SetCore(
+    "SendNotification",
+    {
+        Title = "Saxxgooder",
+        Text = "Loader!",
+    }
+)
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
+local LocalPlayer = Players.LocalPlayer
+local CamlockState = false
+local SilentTarget = nil
+
+-- FOV Circle Setup
+local SilentAimFOVCircle = Drawing.new("Circle")
+SilentAimFOVCircle.Color = getgenv().Saxx.FOVSettings.FOVColor
+SilentAimFOVCircle.Visible = getgenv().Saxx.FOVSettings.ShowFOV
+SilentAimFOVCircle.Filled = getgenv().Saxx.FOVSettings.Filled
+SilentAimFOVCircle.Radius = getgenv().Saxx.FOVSettings.FOVSize
+SilentAimFOVCircle.Transparency = getgenv().Saxx.FOVSettings.FOVTransparency
+SilentAimFOVCircle.Thickness = getgenv().Saxx.FOVSettings.FOVThickness
+
+-- Function to get the closest player to the screen center
+local function getClosestPlayerToCenter()
+    local centerScreenPosition = Vector2.new(workspace.CurrentCamera.ViewportSize.X / 2, workspace.CurrentCamera.ViewportSize.Y / 2 - (game:GetService("GuiService"):GetGuiInset().Y / 2))
+    local closestPlayer
+    local closestDistance = math.huge
+    local localPlayer = game.Players.LocalPlayer
+
+    for _, player in ipairs(game.Players:GetPlayers()) do
+        if player ~= localPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local playerRootPart = player.Character.HumanoidRootPart
+            local screenPosition, onScreen = workspace.CurrentCamera:WorldToViewportPoint(playerRootPart.Position)
+
+            if onScreen then
+                local distance = (centerScreenPosition - Vector2.new(screenPosition.X, screenPosition.Y)).Magnitude
+                if distance < closestDistance and distance <= SilentAimFOVCircle.Radius then
+                    closestPlayer = player
+                    closestDistance = distance
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+-- Update FOV Circle Position and Silent Target
+RunService.RenderStepped:Connect(function()
+    SilentTarget = getClosestPlayerToCenter()
+    SilentAimFOVCircle.Position = Vector2.new(workspace.CurrentCamera.ViewportSize.X / 2, workspace.CurrentCamera.ViewportSize.Y / 2 - (game:GetService("GuiService"):GetGuiInset().Y / 2))
+end)
+
+-- Silent Aim Implementation
+local mt = getrawmetatable(game)
+local old = mt.__namecall
+setreadonly(mt, false)
+mt.__namecall = newcclosure(function(...)
+    local args = {...}
+    if getgenv().Saxx.SilentAimEnabled and SilentTarget and SilentTarget.Character and getnamecallmethod() == "FireServer" and args[2] == "UpdateMousePos" then
+        local targetPosition = SilentTarget.Character[getgenv().Saxx.HitPart].Position
+        local velocity = SilentTarget.Character[getgenv().Saxx.HitPart].Velocity
+        args[3] = targetPosition + (velocity * getgenv().Saxx.SilentPredictionHorizontal) + Vector3.new(0, velocity.Y * getgenv().Saxx.SilentPredictionVertical, 0)
+        return old(unpack(args))
+    end
+    return old(...)
+end)
+setreadonly(mt, true)
+
+-- Function to adjust prediction for moving targets
+local function adjustPrediction(targetVelocity)
+    if getgenv().Saxx.PredictionAdjuster.EnableAdjuster then
+        if targetVelocity.Magnitude > getgenv().Saxx.PredictionAdjuster.VelocityThreshold then
+            local adjustment = targetVelocity * getgenv().Saxx.PredictionAdjuster.AdjustmentFactor
+            return adjustment
+        end
+    end
+    return Vector3.new(0, 0, 0)
+end
+
+-- Function to find the nearest enemy
+local function FindNearestEnemy()
+    local closestDistance, closestPlayer = math.huge, nil
+    local centerPosition = Vector2.new(
+        game:GetService("GuiService"):GetScreenResolution().X / 2,
+        game:GetService("GuiService"):GetScreenResolution().Y / 2
+    )
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local character = player.Character
+            if character and character:FindFirstChild("HumanoidRootPart") and character.Humanoid.Health > 0 then
+                local position, isVisibleOnViewport = 
+                    game:GetService("Workspace").CurrentCamera:WorldToViewportPoint(character.HumanoidRootPart.Position)
+
+                if isVisibleOnViewport then
+                    local distance = (centerPosition - Vector2.new(position.X, position.Y)).Magnitude
+                    if distance < closestDistance then
+                        closestPlayer = character
+                        closestDistance = distance
+                    end
+                end
+            end
+        end
+    end
+
+    return closestPlayer
+end
+
+local enemy = nil
+
+-- Create the Camlock Tool
+local camlockTool = Instance.new("Tool")
+camlockTool.Name = "Lock tool" -- Ensure this matches what you're expecting
+camlockTool.RequiresHandle = false
+camlockTool.Parent = LocalPlayer.Backpack
+
+-- Debugging function to check tool activation
+local function debugPrintCamlockState()
+    print("CamlockState is now:", CamlockState)
+    if enemy then
+        print("Enemy found:", enemy.Name)
+    else
+        print("No enemy found.")
+    end
+end
+
+-- Tool activation for enabling/disabling Camlock
+camlockTool.Activated:Connect(function()
+    CamlockState = not CamlockState
+    print("Camlock toggled:", CamlockState) -- Debugging line
+    getgenv().Saxx.StickyAim = CamlockState -- Toggle Sticky Aim with Camlock
+
+    if CamlockState then
+        enemy = FindNearestEnemy() -- This function should find the nearest enemy
+        print("Nearest enemy found:", enemy) -- Debugging line
+        if enemy then
+            print("Camlock is ON and locking onto:", enemy.Name)
+        else
+            print("No enemy found, cannot lock.")
+        end
+        SendNotification("saxx.lol", "CamLock ON with Sticky Aim")
+    else
+        enemy = nil
+        print("Camlock is OFF.")
+        SendNotification("saxx.lol", "CamLock OFF")
+    end
+
+    -- Additional debug print
+    debugPrintCamlockState()
+end)
+
+-- Function to send notifications
+local function SendNotification(title, text)
+    StarterGui:SetCore("SendNotification", {
+        Title = title,
+        Text = text,
+        Duration = 2 -- Duration in seconds
+    })
+end
+
+-- Function to update mouse position (universal)
+local function UpdateMousePos(targetPosition)
+    local mouse = game:GetService("Players").LocalPlayer:GetMouse()
+    if mouse then
+        -- Simulate mouse position update
+        mouse.X = targetPosition.X
+        mouse.Y = targetPosition.Y
+    end
+end
+
+-- Function to fire the equipped tool
+local function FireEquippedTool()
+    local backpack = LocalPlayer.Backpack
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and tool.Name ~= "ABFK" then -- Exclude the Camlock tool
+            if tool:FindFirstChild("Activate") then
+                tool.Activate:Fire()
+                print("Fired tool:", tool.Name)
+                SendNotification("saxx.lol", "Fired tool: " .. tool.Name)
+                break
+            end
+        end
+    end
+end
+
+-- Texture application based on settings
+if getgenv().Saxx.Textures then
+    local faces = {"Front", "Back", "Bottom", "Top", "Right", "Left"}
+    local materials = {
+        {"Wood", "3258599312"}, {"WoodPlanks", "8676581022"},
+        {"Brick", "8558400252"}, {"Cobblestone", "5003953441"},
+        {"Concrete", "7341687607"}, {"DiamondPlate", "6849247561"},
+        {"Fabric", "118776397"}, {"Granite", "4722586771"},
+        {"Grass", "4722588177"}, {"Ice", "3823766459"},
+        {"Marble", "62967586"}, {"Metal", "62967586"},
+        {"Sand", "152572215"}
+    }
+
+    local function texture(ins, id)
+        for _, v in pairs(faces) do
+            local texture = Instance.new("Texture", ins)
+            texture.ZIndex = 2147483647
+            texture.Texture = "rbxassetid://" .. id
+            texture.Face = Enum.NormalId[v]
+            texture.Color3 = ins.Color
+            texture.Transparency = ins.Transparency
+        end
+    end
+
+    for _, part in pairs(workspace:GetDescendants()) do
+        if part:IsA("BasePart") then
+            for _, v in pairs(materials) do
+                if part.Material.Name == v[1] then
+                    texture(part, v[2])
+                    part.Material = "SmoothPlastic"
+                end
+            end
+        end
+    end
+end
+
+-- RunService Heartbeat to manage camera lock and apply ground impact avoidance
+RunService.Heartbeat:Connect(function()
+    local camera = workspace.CurrentCamera
+    local character = LocalPlayer.Character
+    local humanoid = character and character:FindFirstChild("Humanoid")
+
+    if CamlockState and enemy and enemy:FindFirstChild("HumanoidRootPart") then
+        -- Check if the target's health is below 1 and if the player is free-falling
+        if getgenv().Saxx.SafetyCheck.KOCheck and enemy.Humanoid.Health < 1 and (humanoid and humanoid.FloorMaterial == Enum.Material.Air) then
+            CamlockState = false
+            enemy = nil
+            SendNotification("saxx.lol", "Target KO and Free-falling, CamLock OFF")
+            print("Target KO and Free-falling, CamLock OFF")
+        end
+
+        -- Auto Airshot
+        if getgenv().Saxx.AutoAirshot and (humanoid and humanoid.FloorMaterial == Enum.Material.Air) then
+            -- Trigger airshot
+            FireEquippedTool()
+        end
+
+        if CamlockState and enemy and enemy:FindFirstChild("HumanoidRootPart") then
+            local targetPosition = enemy.HumanoidRootPart.Position + Vector3.new(0, getgenv().Saxx.JumpOffset, 0) + enemy.HumanoidRootPart.Velocity * getgenv().Saxx.CamlockPrediction
+            local targetCFrame = CFrame.new(camera.CFrame.p, targetPosition)
+
+            -- Apply ground impact avoidance
+            local offset = Vector3.new(
+                math.random() * getgenv().Saxx.GroundImpactAvoidance - getgenv().Saxx.GroundImpactAvoidance / 2,
+                0,
+                math.random() * getgenv().Saxx.GroundImpactAvoidance - getgenv().Saxx.GroundImpactAvoidance / 2
+            )
+            targetCFrame = targetCFrame + offset
+
+            -- Apply ground smoothing
+            local smoothedCFrame = CFrame.new(
+                camera.CFrame.p + Vector3.new(
+                    math.random() * getgenv().Saxx.GroundSmoothing - getgenv().Saxx.GroundSmoothing / 2,
+                    0,
+                    math.random() * getgenv().Saxx.GroundSmoothing - getgenv().Saxx.GroundSmoothing / 2
+                )
+            )
+
+            -- Smoothly interpolate the camera's CFrame towards the targetCFrame
+            camera.CFrame = camera.CFrame:Lerp(targetCFrame, getgenv().Saxx.Smoothing)
+        end
+    end
+end)
+
+-- Load additional script
+loadstring(game:HttpGet("https://raw.githubusercontent.com/Pixeluted/adoniscries/main/Source.lua", true))()
